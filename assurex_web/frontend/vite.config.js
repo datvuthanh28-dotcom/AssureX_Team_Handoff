@@ -3,7 +3,10 @@ import { defineConfig } from 'vite'
 
 // https://vite.dev/config/
 export default defineConfig({
-  root: '..',
-  publicDir: 'frontend/public',
+  root: '../..',
+  publicDir: 'assurex_web/frontend/public',
+  build: {
+    outDir: 'assurex_web/dist',
+  },
   plugins: [react()],
 })
