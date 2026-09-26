@@ -10,6 +10,9 @@ export default defineConfig({
   resolve: {
     dedupe: ['react', 'react-dom'],
   },
+  server: {
+    host: '0.0.0.0',
+  },
   build: {
     outDir: 'assurex_web/dist',
   },
