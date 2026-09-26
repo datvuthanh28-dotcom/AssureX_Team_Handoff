@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, Integer, JSON, String, Text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -45,6 +45,115 @@ class Claim(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         default=datetime.utcnow,
+        nullable=False,
+    )
+
+
+class ClaimEvidence(Base):
+    __tablename__ = "claim_evidence"
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        index=True,
+    )
+
+    claim_id: Mapped[str] = mapped_column(
+        String(50),
+        ForeignKey("claims.claim_id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+
+    document_type: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+    )
+
+    document_name: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    document_status: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+    )
+
+    ocr_status: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+    )
+
+    ocr_confidence: Mapped[float | None] = mapped_column(
+        Float,
+        nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        nullable=False,
+    )
+
+
+class ClaimAnalysis(Base):
+    __tablename__ = "claim_analysis"
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        index=True,
+    )
+
+    claim_id: Mapped[str] = mapped_column(
+        String(50),
+        ForeignKey("claims.claim_id", ondelete="CASCADE"),
+        unique=True,
+        index=True,
+        nullable=False,
+    )
+
+    ml_prediction: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+    )
+
+    ml_confidence: Mapped[float] = mapped_column(
+        Float,
+        nullable=False,
+    )
+
+    probabilities: Mapped[dict] = mapped_column(
+        JSON,
+        nullable=False,
+    )
+
+    final_decision: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+    )
+
+    rule_triggered: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+    )
+
+    decision_reasons: Mapped[list] = mapped_column(
+        JSON,
+        default=list,
+        nullable=False,
+    )
+
+    model_version: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+    )
+
+    analyzed_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
         nullable=False,
     )
 

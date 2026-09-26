@@ -1,0 +1,6 @@
+.venv/
+.vite/
+**/__pycache__/
+*.py[cod]
+assurex_web/dist/
+assurex_web/backend/assurex.db

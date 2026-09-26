@@ -1,49 +1,53 @@
-const API_BASE =
-  'http://127.0.0.1:8000'
+import axios from 'axios'
 
+const API_BASE = (
+  import.meta.env.VITE_API_URL ||
+  'http://localhost:8000/api'
+).replace(/\/+$/, '')
 
-export async function api(
-  path,
-  options = {},
-) {
-  const isFormData =
-    options.body instanceof FormData
+const apiClient = axios.create({
+  baseURL: API_BASE,
+  timeout: 15000,
+})
 
-  const headers = {
-    ...(options.headers || {}),
-  }
+const ERROR_MESSAGES = {
+  400: 'Please check the submitted information.',
+  401: 'Your session is no longer valid. Please sign in again.',
+  403: 'You do not have permission to do that.',
+  404: 'Claim not found.',
+  409: 'Claim ID already exists.',
+  422: 'Please check the required fields.',
+  500: 'AssureX could not complete the request. Please try again.',
+}
 
-  if (
-    options.body &&
-    !isFormData &&
-    !headers['Content-Type']
-  ) {
-    headers['Content-Type'] =
-      'application/json'
-  }
+export async function api(path, options = {}) {
+  const url = path.startsWith('/api/')
+    ? path.slice(4)
+    : path
+  let data = options.body
 
-  const response = await fetch(
-    `${API_BASE}${path}`,
-    {
-      ...options,
-      headers,
+  if (typeof data === 'string') {
+    try {
+      data = JSON.parse(data)
+    } catch {
+      data = options.body
     }
-  )
-
-  let data = null
+  }
 
   try {
-    data = await response.json()
-  } catch {
-    data = null
-  }
+    const response = await apiClient.request({
+      url,
+      method: options.method || 'GET',
+      data,
+      headers: options.headers,
+    })
+    return response.data
+  } catch (error) {
+    const status = error.response?.status
+    const message = status
+      ? ERROR_MESSAGES[status] || 'The request failed. Please try again.'
+      : 'Unable to connect to AssureX backend.'
 
-  if (!response.ok) {
-    throw new Error(
-      data?.detail ||
-      `Request failed: ${response.status}`
-    )
+    throw new Error(message)
   }
-
-  return data
 }

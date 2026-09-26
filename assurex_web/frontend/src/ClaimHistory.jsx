@@ -1,37 +1,28 @@
 import { useEffect, useState } from 'react'
-
-const API_URL = 'http://127.0.0.1:8000'
+import { api } from './api'
 
 function ClaimHistory() {
   const [claims, setClaims] = useState([])
   const [loading, setLoading] = useState(true)
   const [selectedClaim, setSelectedClaim] = useState(null)
+  const [error, setError] = useState('')
 
   useEffect(() => {
-    fetch(`${API_URL}/api/claims`)
-      .then((response) => response.json())
+    api('/api/claims')
       .then((data) => setClaims(data))
-      .catch((error) => {
-        console.error('Failed to load claim history:', error)
-      })
+      .catch((err) => setError(err.message))
       .finally(() => setLoading(false))
   }, [])
 
   async function openClaim(claimId) {
     try {
-      const response = await fetch(
-        `${API_URL}/api/claims/${claimId}`
+      const data = await api(
+        `/api/claims/${encodeURIComponent(claimId)}`
       )
-
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.detail || 'Failed to load claim.')
-      }
-
       setSelectedClaim(data)
-    } catch (error) {
-      console.error(error)
+      setError('')
+    } catch (err) {
+      setError(err.message)
     }
   }
 
@@ -41,6 +32,8 @@ function ClaimHistory() {
 
   return (
     <>
+      {error && <div className="alert error">{error}</div>}
+
       <section className="form-section">
         <div className="form-section-header">
           <p className="eyebrow">Stored Claims</p>
@@ -53,6 +46,7 @@ function ClaimHistory() {
               <tr>
                 <th>Claim ID</th>
                 <th>Prediction</th>
+                <th>Final Decision</th>
                 <th>Confidence</th>
                 <th>Model</th>
                 <th>Created</th>
@@ -68,8 +62,11 @@ function ClaimHistory() {
                 >
                   <td>{claim.claim_id}</td>
                   <td>{claim.predicted_class}</td>
+                  <td>{claim.final_decision || 'Not analyzed yet'}</td>
                   <td>
-                    {(claim.confidence * 100).toFixed(2)}%
+                    {claim.confidence == null
+                      ? '—'
+                      : `${(claim.confidence * 100).toFixed(2)}%`}
                   </td>
                   <td>{claim.model_name}</td>
                   <td>
@@ -96,9 +93,16 @@ function ClaimHistory() {
             </div>
 
             <div>
+              <span>Final Decision</span>
+              <strong>{selectedClaim.final_decision || 'Not analyzed yet'}</strong>
+            </div>
+
+            <div>
               <span>Confidence</span>
               <strong>
-                {(selectedClaim.confidence * 100).toFixed(2)}%
+                {selectedClaim.confidence == null
+                  ? '—'
+                  : `${(selectedClaim.confidence * 100).toFixed(2)}%`}
               </strong>
             </div>
 

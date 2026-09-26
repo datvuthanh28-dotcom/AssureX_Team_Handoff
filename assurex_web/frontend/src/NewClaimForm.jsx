@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { claimFieldGroups } from './claimFields'
-
-const API_URL = 'http://127.0.0.1:8000'
+import { api } from './api'
 
 function NewClaimForm() {
   const [claimId, setClaimId] = useState('')
@@ -28,25 +27,17 @@ function NewClaimForm() {
     setResult(null)
 
     try {
-      const response = await fetch(`${API_URL}/api/claims/predict`, {
+      const created = await api('/api/claims', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify({
           claim_id: claimId,
           input_data: formData,
         }),
       })
-
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(
-          data.detail || 'Claim classification failed.'
-        )
-      }
-
+      const data = await api(
+        `/api/claims/${encodeURIComponent(created.claim_id)}/analyze`,
+        { method: 'POST' }
+      )
       setResult(data)
     } catch (err) {
       setError(err.message)
@@ -137,18 +128,22 @@ function NewClaimForm() {
           <section className="form-section">
             <p className="eyebrow">Classification Result</p>
 
-            <h2>{result.predicted_class}</h2>
+            <h2>{result.final_decision}</h2>
 
             <p>
-              Confidence:{' '}
+              ML Prediction: <strong>{result.ml_prediction}</strong>
+            </p>
+
+            <p>
+              ML Confidence:{' '}
               <strong>
-                {(result.confidence * 100).toFixed(2)}%
+                {(result.ml_confidence * 100).toFixed(2)}%
               </strong>
             </p>
 
-            <p>
-              Model: {result.model_name}
-            </p>
+            <p>Rule Triggered: {result.rule_triggered ? 'Yes' : 'No'}</p>
+            <p>Decision Reasons: {result.decision_reasons.join(', ') || 'None'}</p>
+            <p>Model: {result.model_version}</p>
           </section>
         )}
 

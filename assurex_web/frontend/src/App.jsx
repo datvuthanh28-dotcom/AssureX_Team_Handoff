@@ -109,31 +109,30 @@ function AdminDashboard({
 }) {
   const [mlClaims, setMlClaims] = useState([])
   const [customerClaims, setCustomerClaims] = useState([])
+  const [stats, setStats] = useState({
+    total_claims: 0,
+    valid_claims: 0,
+    invalid_claims: 0,
+    manual_review: 0,
+    pending_claims: 0,
+  })
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
 
   useEffect(() => {
     Promise.all([
       api('/api/claims'),
       api('/api/customer/claims'),
+      api('/api/dashboard/stats'),
     ])
-      .then(([ml, customer]) => {
+      .then(([ml, customer, dashboardStats]) => {
         setMlClaims(ml)
         setCustomerClaims(customer)
+        setStats(dashboardStats)
       })
+      .catch((err) => setError(err.message))
       .finally(() => setLoading(false))
   }, [refreshKey])
-
-  const review = customerClaims.filter(
-    (claim) => claim.status === 'Under Review'
-  ).length
-
-  const approved = customerClaims.filter(
-    (claim) => claim.status === 'Approved'
-  ).length
-
-  const rejected = customerClaims.filter(
-    (claim) => claim.status === 'Rejected'
-  ).length
 
   return (
     <>
@@ -183,36 +182,44 @@ function AdminDashboard({
         </div>
       </section>
 
+      {error && <div className="alert error">{error}</div>}
+
       {loading ? (
         <LoadingState />
       ) : (
         <>
           <section className="stats-grid">
             <StatCard
-              label="Customer Claims"
-              value={customerClaims.length}
-              hint="Total submitted"
+              label="Total Claims"
+              value={stats.total_claims}
+              hint="Stored in SQLite"
             />
 
             <StatCard
-              label="Under Review"
-              value={review}
+              label="Valid Claims"
+              value={stats.valid_claims}
+              hint="Final decision: valid"
+              tone="success"
+            />
+
+            <StatCard
+              label="Invalid Claims"
+              value={stats.invalid_claims}
+              hint="Final decision: invalid"
+              tone="danger"
+            />
+
+            <StatCard
+              label="Manual Review"
+              value={stats.manual_review}
               hint="Requires staff attention"
               tone="warning"
             />
 
             <StatCard
-              label="Approved"
-              value={approved}
-              hint="Approved customer claims"
-              tone="success"
-            />
-
-            <StatCard
-              label="Rejected"
-              value={rejected}
-              hint="Rejected customer claims"
-              tone="danger"
+              label="Pending Claims"
+              value={stats.pending_claims}
+              hint="Not analyzed yet"
             />
           </section>
 
@@ -320,13 +327,16 @@ function AdminCustomerClaims({
     useState('All')
   const [loading, setLoading] = useState(true)
   const [updating, setUpdating] = useState(false)
+  const [error, setError] = useState('')
 
   function loadClaims() {
     setLoading(true)
+    setError('')
 
     api('/api/customer/claims')
       .then((data) => {
         setClaims(data)
+        setError('')
 
         if (selected) {
           const fresh = data.find(
@@ -337,6 +347,7 @@ function AdminCustomerClaims({
           if (fresh) setSelected(fresh)
         }
       })
+      .catch((err) => setError(err.message))
       .finally(() => setLoading(false))
   }
 
@@ -374,6 +385,7 @@ function AdminCustomerClaims({
     if (!selected) return
 
     setUpdating(true)
+    setError('')
 
     try {
       const updated = await api(
@@ -395,6 +407,8 @@ function AdminCustomerClaims({
       )
 
       onChanged()
+    } catch (err) {
+      setError(err.message)
     } finally {
       setUpdating(false)
     }
@@ -407,6 +421,8 @@ function AdminCustomerClaims({
         title="Customer Claims"
         description="Review, search and update submitted warranty claims."
       />
+
+      {error && <div className="alert error">{error}</div>}
 
       <section className="panel">
         <div className="toolbar">
@@ -631,14 +647,15 @@ function MLClassification({ onCreated }) {
 
   async function submit(event) {
     event.preventDefault()
+    if (loading) return
 
     setLoading(true)
     setError('')
     setResult(null)
 
     try {
-      const data = await api(
-        '/api/claims/predict',
+      const created = await api(
+        '/api/claims',
         {
           method: 'POST',
           body: JSON.stringify({
@@ -646,6 +663,10 @@ function MLClassification({ onCreated }) {
             input_data: formData,
           }),
         }
+      )
+      const data = await api(
+        `/api/claims/${encodeURIComponent(created.claim_id)}/analyze`,
+        { method: 'POST' }
       )
 
       setResult(data)
@@ -776,16 +797,23 @@ function MLClassification({ onCreated }) {
                 Classification Result
               </p>
 
-              <h2>{result.predicted_class}</h2>
+              <h2>{result.final_decision}</h2>
 
               <p>
-                Confidence:{' '}
+                ML Prediction: <strong>{result.ml_prediction}</strong>
+              </p>
+
+              <p>
+                ML Confidence:{' '}
                 <strong>
-                  {(result.confidence * 100)
+                  {(result.ml_confidence * 100)
                     .toFixed(2)}
                   %
                 </strong>
               </p>
+
+              <p>Rule Triggered: <strong>{result.rule_triggered ? 'Yes' : 'No'}</strong></p>
+              <p>Decision Reasons: <strong>{result.decision_reasons.length ? result.decision_reasons.join(', ') : 'None'}</strong></p>
             </div>
 
             <div className="probability-list">
@@ -840,10 +868,13 @@ function MLHistory({ refreshKey }) {
   const [selected, setSelected] = useState(null)
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [analyzing, setAnalyzing] = useState(false)
 
   useEffect(() => {
     api('/api/claims')
       .then(setClaims)
+      .catch((err) => setError(err.message))
       .finally(() => setLoading(false))
   }, [refreshKey])
 
@@ -854,11 +885,51 @@ function MLHistory({ refreshKey }) {
   )
 
   async function openClaim(claimId) {
-    const detail = await api(
-      `/api/claims/${claimId}`
-    )
+    try {
+      const detail = await api(
+        `/api/claims/${encodeURIComponent(claimId)}`
+      )
+      setSelected(detail)
+      setError('')
+    } catch (err) {
+      setError(err.message)
+    }
+  }
 
-    setSelected(detail)
+  async function analyzeSelected() {
+    if (!selected || analyzing) return
+
+    setAnalyzing(true)
+    setError('')
+
+    try {
+      const analysis = await api(
+        `/api/claims/${encodeURIComponent(selected.claim_id)}/analyze`,
+        { method: 'POST' }
+      )
+      const detail = await api(
+        `/api/claims/${encodeURIComponent(selected.claim_id)}`
+      )
+      setSelected(detail)
+      setClaims((current) =>
+        current.map((claim) =>
+          claim.claim_id === analysis.claim_id
+            ? {
+                ...claim,
+                predicted_class: analysis.ml_prediction,
+                confidence: analysis.ml_confidence,
+                final_decision: analysis.final_decision,
+                decision_reasons: analysis.decision_reasons,
+                model_name: analysis.model_version,
+              }
+            : claim
+        )
+      )
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setAnalyzing(false)
+    }
   }
 
   return (
@@ -868,6 +939,8 @@ function MLHistory({ refreshKey }) {
         title="Classification History"
         description="Review stored production model predictions and their original feature values."
       />
+
+      {error && <div className="alert error">{error}</div>}
 
       <section className="panel">
         <div className="toolbar">
@@ -896,7 +969,7 @@ function MLHistory({ refreshKey }) {
               <thead>
                 <tr>
                   <th>Claim ID</th>
-                  <th>Prediction</th>
+                  <th>Decision / ML</th>
                   <th>Confidence</th>
                   <th>Model</th>
                   <th>Created</th>
@@ -915,11 +988,8 @@ function MLHistory({ refreshKey }) {
                       {claim.claim_id}
                     </td>
                     <td>
-                      <StatusBadge
-                        value={
-                          claim.predicted_class
-                        }
-                      />
+                      <StatusBadge value={claim.final_decision || 'Pending'} />
+                      <small>{claim.predicted_class || 'Not analyzed yet'}</small>
                     </td>
                     <td>
                       {(claim.confidence * 100)
@@ -951,13 +1021,13 @@ function MLHistory({ refreshKey }) {
             </div>
 
             <StatusBadge
-              value={selected.predicted_class}
+              value={selected.final_decision || 'Not analyzed yet'}
             />
           </div>
 
           <div className="detail-grid">
             <div>
-              <span>Prediction</span>
+              <span>ML Prediction</span>
               <strong>
                 {selected.predicted_class}
               </strong>
@@ -966,10 +1036,20 @@ function MLHistory({ refreshKey }) {
             <div>
               <span>Confidence</span>
               <strong>
-                {(selected.confidence * 100)
-                  .toFixed(2)}
-                %
+                {selected.confidence == null
+                  ? '—'
+                  : `${(selected.confidence * 100).toFixed(2)}%`}
               </strong>
+            </div>
+
+            <div>
+              <span>Final Decision</span>
+              <strong>{selected.final_decision || 'Not analyzed yet'}</strong>
+            </div>
+
+            <div>
+              <span>Rule Triggered</span>
+              <strong>{selected.latest_analysis?.rule_triggered ? 'Yes' : 'No'}</strong>
             </div>
 
             <div>
@@ -986,6 +1066,23 @@ function MLHistory({ refreshKey }) {
               </strong>
             </div>
           </div>
+
+          <div className="description-box">
+            <span>Decision Reasons</span>
+            <p>{selected.decision_reasons?.length ? selected.decision_reasons.join(', ') : 'None'}</p>
+          </div>
+
+          {!selected.latest_analysis && (
+            <div className="form-actions">
+              <button
+                className="button primary"
+                disabled={analyzing}
+                onClick={analyzeSelected}
+              >
+                {analyzing ? 'Analyzing claim...' : 'Analyze Claim'}
+              </button>
+            </div>
+          )}
 
           <div className="feature-grid">
             {Object.entries(
@@ -1206,14 +1303,17 @@ function CustomerHome({
 }) {
   const [claims, setClaims] = useState([])
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
 
   useEffect(() => {
     if (!email) {
       setClaims([])
+      setError('')
       return
     }
 
     setLoading(true)
+    setError('')
 
     api(
       `/api/customer/claims?email=${encodeURIComponent(
@@ -1221,6 +1321,7 @@ function CustomerHome({
       )}`
     )
       .then(setClaims)
+    .catch((err) => setError(err.message))
       .finally(() => setLoading(false))
   }, [email, refreshKey])
 
@@ -1256,6 +1357,8 @@ function CustomerHome({
         email={email}
         onChange={setEmail}
       />
+
+      {error && <div className="alert error">{error}</div>}
 
       <section className="customer-hero">
         <div>
@@ -2783,15 +2886,18 @@ function CustomerClaims({
   const [claims, setClaims] = useState([])
   const [selected, setSelected] = useState(null)
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
 
   useEffect(() => {
     if (!email) {
       setClaims([])
       setSelected(null)
+      setError('')
       return
     }
 
     setLoading(true)
+    setError('')
 
     api(
       `/api/customer/claims?email=${encodeURIComponent(
@@ -2799,6 +2905,7 @@ function CustomerClaims({
       )}`
     )
       .then(setClaims)
+    .catch((err) => setError(err.message))
       .finally(() => setLoading(false))
   }, [email, refreshKey])
 
@@ -2814,6 +2921,8 @@ function CustomerClaims({
         email={email}
         onChange={setEmail}
       />
+
+      {error && <div className="alert error">{error}</div>}
 
       <section className="panel">
         {loading ? (
